@@ -31,6 +31,14 @@ paseo plugin add omercnet/paseo-shared-browser
 paseo plugin ls
 ```
 
+Or install a published archive:
+
+```bash
+gh release download --repo omercnet/paseo-shared-browser --pattern 'shared-browser-*.zip'
+unzip shared-browser-v*.zip
+paseo plugin install "$PWD/shared-browser"
+```
+
 Installation runs the manifest `build` steps: `npm ci`, `npm run prepare:runtime`, and
 `playwright install chromium`. The Chromium download is roughly 180 MB and needs network access on
 the daemon host.
