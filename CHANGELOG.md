@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/omercnet/paseo-shared-browser/compare/v0.1.0...v0.1.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* include README screenshots in release archives ([#6](https://github.com/omercnet/paseo-shared-browser/issues/6)) ([a231db4](https://github.com/omercnet/paseo-shared-browser/commit/a231db4b20e9c52ebe8624ad69e34e907037ac0a))
+
 ## 0.1.0 (2026-09-07)
 
 
