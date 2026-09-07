@@ -7,6 +7,16 @@ This is not URL synchronization and not a second browser with copied cookies. Ev
 same running page, the same DOM, and the same login state. One viewer holds control at a time and
 hands it over explicitly.
 
+## Screenshots
+
+### Wide desktop
+
+![Shared Browser showing the same live Paseo page to two viewers on desktop](docs/images/shared-browser-wide.png)
+
+### Compact client
+
+![Shared Browser controls and the same canonical browser viewport on a compact client](docs/images/shared-browser-compact.png)
+
 ## What it does
 
 - One persistent Chromium session per workspace, owned by the plugin on the daemon host.

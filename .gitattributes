@@ -4,6 +4,7 @@
 /.dev export-ignore
 /.gitattributes export-ignore
 /.github export-ignore
+/docs export-ignore
 /.release-please-manifest.json export-ignore
 /release-please-config.json export-ignore
 /renovate.json export-ignore
