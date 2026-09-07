@@ -1,0 +1,8 @@
+{
+  "id": "shared-browser",
+  "build": [
+    ["npm", "ci"],
+    ["npm", "run", "prepare:runtime"],
+    ["npm", "exec", "--", "playwright", "install", "chromium"]
+  ]
+}
