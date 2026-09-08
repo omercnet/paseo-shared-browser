@@ -67,7 +67,7 @@ Browser** composer pill that appears while a workspace session is open.
 
 - Plugins are trusted, unsandboxed code. Server code runs as the daemon user on the daemon host.
 - The launched Chromium keeps its own sandbox enabled; no `--no-sandbox`.
-- Control tokens coordinate same-user paired clients. Paseo v0.7 plugin RPC exposes no
+- Control tokens coordinate same-user paired clients. Paseo v0.8 plugin RPC callbacks expose no
   authenticated caller identity, so they are a workflow safeguard, not an authorization boundary.
 - Playwright uses pipe transport, so no CDP network port is opened.
 - Downloads, uploads, clipboard sync, media permissions, and extensions stay disabled.
@@ -93,5 +93,5 @@ to the host's Tailscale IPv4 address, so it runs locally rather than in CI.
 Release Please maintains the version, changelog, tags, and GitHub releases from Conventional
 Commits. Each release attaches an installable `shared-browser-vX.Y.Z.zip` archive.
 
-The plugin targets the stable Paseo `0.7.x` plugin API with React `19.1`, React Native `0.81`, and
+The plugin targets the Paseo `0.8.0-beta.1` plugin API with React `19.1`, React Native `0.81`, and
 Playwright `1.63`.

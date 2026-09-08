@@ -1,11 +1,11 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
-import { afterEach, describe, expect, it } from "vitest";
-import { SessionManager } from "../server/browser.server";
-
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "../server/browser";
 class FakePage extends EventEmitter {
   navigateOnMouseDown = false;
   mouseUpCalls = 0;
@@ -191,7 +191,6 @@ async function createManager(
   });
   return { manager, contexts };
 }
-
 describe("SessionManager control leases", () => {
   it("shares one session, excludes a second controller, and supports explicit takeover", async () => {
     const { manager, contexts } = await createManager();
@@ -228,6 +227,51 @@ describe("SessionManager control leases", () => {
     await expect(manager.capture(first.viewerToken, "medium", null)).rejects.toThrow(
       "invalid or expired",
     );
+  });
+
+  it("closes an in-flight archive target without deleting its profile", async () => {
+    const root = await mkdtemp(join(tmpdir(), "shared-browser-unit-"));
+    roots.push(root);
+    const workspaceId = "workspace-archive-race";
+    const profilePath = join(root, createHash("sha256").update(workspaceId).digest("hex"));
+    let releaseLaunch!: () => void;
+    const launchGate = new Promise<void>((resolve) => {
+      releaseLaunch = resolve;
+    });
+    const contexts: FakeContext[] = [];
+    const manager = new SessionManager({
+      stateRoot: root,
+      validateWorkspace: async (id) => id === workspaceId,
+      launchPersistentContext: async () => {
+        const context = new FakeContext();
+        contexts.push(context);
+        await launchGate;
+        return context as unknown as BrowserContext;
+      },
+    });
+
+    const attaching = manager.attach(workspaceId, "First client");
+    await vi.waitFor(() => expect(contexts).toHaveLength(1));
+
+    const archiving = manager.archiveWorkspace(workspaceId);
+    releaseLaunch();
+
+    await expect(attaching).rejects.toThrow("archived");
+    await expect(archiving).resolves.toBeUndefined();
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]!.closed).toBe(true);
+    expect((await stat(profilePath)).isDirectory()).toBe(true);
+
+    const reopened = await manager.attach(workspaceId, "Second client");
+    expect(reopened.state.workspaceId).toBe(workspaceId);
+    expect(contexts).toHaveLength(2);
+
+    await manager.archiveWorkspace(workspaceId);
+    await manager.archiveWorkspace(workspaceId);
+    expect(contexts[1]!.closed).toBe(true);
+    expect((await stat(profilePath)).isDirectory()).toBe(true);
+
+    await manager.close();
   });
 
   it("expires an abandoned controller without replaying its authority", async () => {

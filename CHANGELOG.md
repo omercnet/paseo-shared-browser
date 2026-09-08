@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+
+### Changes
+
+* migrate Shared Browser to Paseo 0.8 runtime entries and client/server modules
+
+
 ## [0.1.1](https://github.com/omercnet/paseo-shared-browser/compare/v0.1.0...v0.1.1) (2026-09-07)
 
 

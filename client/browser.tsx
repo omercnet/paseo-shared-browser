@@ -4,18 +4,16 @@ import {
   type PluginComposerPillProps,
   type PluginWorkspacePanelProps,
   useRpc,
-} from "@getpaseo/plugin";
-import { Icon, Modal } from "@getpaseo/plugin/react-native";
+} from "@getpaseo/plugin/client";
+import { Icon, Modal, ScrollView, TextInput } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
   PanResponder,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent,
@@ -42,7 +40,7 @@ import {
   type BrowserInputEvent,
   type BrowserState,
   type DevicePresetId,
-} from "../shared/browser.shared";
+} from "../shared/browser";
 
 const SPACE = {
   xxs: 2,
@@ -882,6 +880,7 @@ export function contributeSharedBrowserClient(client: PluginClientContext) {
   const presenceTimer = setInterval(() => void refreshPresence(), PILL_PRESENCE_POLL_MS);
 
   return () => {
+    if (stopped) return;
     stopped = true;
     clearInterval(presenceTimer);
     unsubscribe();
@@ -890,7 +889,6 @@ export function contributeSharedBrowserClient(client: PluginClientContext) {
     agents.clear();
   };
 }
-
 export function SharedBrowserPanel({
   theme,
   host,
