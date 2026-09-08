@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { chromium } from "playwright";
 import { afterEach, expect, it, vi } from "vitest";
-import type { BrowserFrame, BrowserState } from "../shared/browser.shared";
-import { SessionManager } from "../server/browser.server";
+import type { BrowserFrame, BrowserState } from "../shared/browser";
+import { SessionManager } from "../server/browser";
 
 const execFile = promisify(execFileCallback);
 const roots: string[] = [];

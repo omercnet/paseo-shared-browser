@@ -5,7 +5,7 @@ import {
   browserInputEventSchema,
   mapDisplayedPoint,
   viewportSchema,
-} from "../shared/browser.shared";
+} from "../shared/browser";
 
 describe("mapDisplayedPoint", () => {
   it("maps a contained image point into canonical CSS pixels", () => {

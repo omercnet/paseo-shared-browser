@@ -1,4 +1,4 @@
-import { defineRpc } from "@getpaseo/plugin/server";
+import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
 export const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;

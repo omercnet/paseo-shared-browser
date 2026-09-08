@@ -1,11 +1,10 @@
+import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { BrowserContext, CDPSession, Page, chromium as Chromium } from "playwright";
-import type { output as ZodOutput } from "zod";
 import {
   DEVICE_PRESETS,
   DEFAULT_VIEWPORT,
@@ -17,6 +16,7 @@ import {
   attachBrowserRpc,
   captureBrowserRpc,
   detachBrowserRpc,
+  listOpenBrowserWorkspacesRpc,
   mapDisplayedPoint,
   navigateBrowserRpc,
   releaseControlRpc,
@@ -27,7 +27,97 @@ import {
   type BrowserState,
   type DevicePresetId,
   type Viewport,
-} from "../shared/browser.shared";
+} from "../shared/browser";
+
+type LaunchPersistentContextOptions = Record<string, unknown>;
+
+interface BrowserMouse {
+  click(...args: unknown[]): Promise<void>;
+  move(...args: unknown[]): Promise<void>;
+  down(...args: unknown[]): Promise<void>;
+  up(...args: unknown[]): Promise<void>;
+  wheel(...args: unknown[]): Promise<void>;
+}
+
+interface BrowserKeyboard {
+  insertText(...args: unknown[]): Promise<void>;
+  press(...args: unknown[]): Promise<void>;
+  down(...args: unknown[]): Promise<void>;
+  up(...args: unknown[]): Promise<void>;
+}
+
+interface BrowserFrameHandle {
+  url(): string;
+}
+
+interface BrowserPage {
+  mouse: BrowserMouse;
+  keyboard: BrowserKeyboard;
+  url(): string;
+  title(): Promise<string>;
+  mainFrame(): BrowserFrameHandle;
+  setDefaultTimeout(...args: unknown[]): void;
+  setDefaultNavigationTimeout(...args: unknown[]): void;
+  setViewportSize(...args: unknown[]): Promise<void>;
+  goto(...args: unknown[]): Promise<unknown>;
+  goBack(...args: unknown[]): Promise<unknown>;
+  goForward(...args: unknown[]): Promise<unknown>;
+  reload(...args: unknown[]): Promise<unknown>;
+  screenshot(...args: unknown[]): Promise<Buffer>;
+  close(...args: unknown[]): Promise<void>;
+  isClosed(): boolean;
+  on(...args: unknown[]): void;
+}
+
+interface BrowserCdpSession {
+  send(...args: unknown[]): Promise<unknown>;
+  on(...args: unknown[]): void;
+}
+
+interface BrowserContext {
+  pages(...args: unknown[]): BrowserPage[];
+  newPage(...args: unknown[]): Promise<BrowserPage>;
+  newCDPSession(...args: unknown[]): Promise<BrowserCdpSession>;
+  isClosed(): boolean;
+  close(...args: unknown[]): Promise<void>;
+  on(...args: unknown[]): void;
+}
+
+interface ChromiumRuntime {
+  launchPersistentContext(
+    userDataDir: string,
+    options: LaunchPersistentContextOptions,
+  ): Promise<BrowserContext>;
+}
+
+type PersistentContextLauncher = (
+  userDataDir: string,
+  options: LaunchPersistentContextOptions,
+) => Promise<BrowserContext>;
+
+export type WorkspaceValidator = (workspaceId: string) => Promise<void | boolean>;
+
+type AttachInput = RpcInput<typeof attachBrowserRpc>;
+type AttachOutput = RpcOutput<typeof attachBrowserRpc>;
+type DetachInput = RpcInput<typeof detachBrowserRpc>;
+type DetachOutput = RpcOutput<typeof detachBrowserRpc>;
+type CaptureInput = RpcInput<typeof captureBrowserRpc>;
+type CaptureOutput = RpcOutput<typeof captureBrowserRpc>;
+type AcquireControlInput = RpcInput<typeof acquireControlRpc>;
+type AcquireControlOutput = RpcOutput<typeof acquireControlRpc>;
+type ReleaseControlInput = RpcInput<typeof releaseControlRpc>;
+type ReleaseControlOutput = RpcOutput<typeof releaseControlRpc>;
+type ListOpenOutput = RpcOutput<typeof listOpenBrowserWorkspacesRpc>;
+type NavigateInput = RpcInput<typeof navigateBrowserRpc>;
+type NavigateOutput = RpcOutput<typeof navigateBrowserRpc>;
+type ResizeInput = RpcInput<typeof resizeBrowserRpc>;
+type ResizeOutput = RpcOutput<typeof resizeBrowserRpc>;
+type ApplyDevicePresetInput = RpcInput<typeof applyDevicePresetRpc>;
+type ApplyDevicePresetOutput = RpcOutput<typeof applyDevicePresetRpc>;
+type SendInput = RpcInput<typeof sendBrowserInputRpc>;
+type SendOutput = RpcOutput<typeof sendBrowserInputRpc>;
+type CaptureQuality = CaptureInput["quality"];
+type InputTarget = SendInput["target"];
 
 const DIRECTORY_MODE = 0o700;
 const VIEWER_TTL_MS = 45_000;
@@ -47,24 +137,6 @@ const JPEG_QUALITIES = {
   medium: [65, 50, 35, 20, 10, 1],
   high: [85, 70, 55, 40, 25, 10, 1],
 } as const;
-
-type AttachInput = ZodOutput<typeof attachBrowserRpc.input>;
-type DetachInput = ZodOutput<typeof detachBrowserRpc.input>;
-type CaptureInput = ZodOutput<typeof captureBrowserRpc.input>;
-type AcquireControlInput = ZodOutput<typeof acquireControlRpc.input>;
-type ReleaseControlInput = ZodOutput<typeof releaseControlRpc.input>;
-type CaptureQuality = ZodOutput<typeof captureBrowserRpc.input>["quality"];
-type NavigateInput = ZodOutput<typeof navigateBrowserRpc.input>;
-type ResizeInput = ZodOutput<typeof resizeBrowserRpc.input>;
-type ApplyDevicePresetInput = ZodOutput<typeof applyDevicePresetRpc.input>;
-type InputTarget = SendInput["target"];
-type SendInput = ZodOutput<typeof sendBrowserInputRpc.input>;
-
-export type WorkspaceValidator = (workspaceId: string) => Promise<void | boolean>;
-export type PersistentContextLauncher = (
-  userDataDir: string,
-  options: Parameters<typeof Chromium.launchPersistentContext>[1],
-) => Promise<BrowserContext>;
 
 export interface SessionManagerOptions {
   stateRoot: string;
@@ -108,8 +180,8 @@ interface BrowserSession {
   workspaceId: string;
   sessionId: string;
   context: BrowserContext;
-  page: Page;
-  cdp: CDPSession;
+  page: BrowserPage;
+  cdp: BrowserCdpSession;
   viewport: Viewport;
   navigationGeneration: number;
   viewportGeneration: number;
@@ -138,14 +210,11 @@ interface BrowserSession {
 function defaultStateRoot(): string {
   return join(homedir(), ".paseo", "plugin-data", "shared-browser");
 }
-interface PlaywrightRuntime {
-  chromium: typeof Chromium;
-}
 
-function loadChromium(stateRoot: string): typeof Chromium {
+function loadChromium(stateRoot: string): ChromiumRuntime {
   const runtimeRequire = createRequire(join(stateRoot, "runtime", "package.json"));
   try {
-    const playwrightRuntime = runtimeRequire("playwright") as PlaywrightRuntime;
+    const playwrightRuntime = runtimeRequire("playwright") as { chromium: ChromiumRuntime };
     return playwrightRuntime.chromium;
   } catch {
     throw new Error(
@@ -206,6 +275,7 @@ export class SessionManager {
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly sessionCreations = new Map<string, Promise<BrowserSession>>();
   private readonly viewerSessions = new Map<string, BrowserSession>();
+  private readonly workspaceTeardownRequests = new Set<string>();
   private closed = false;
 
   constructor(options: SessionManagerOptions) {
@@ -268,6 +338,51 @@ export class SessionManager {
       if (session.viewers.size === 0) await this.stopScreencast(session);
       return { detached };
     });
+  }
+  async archiveWorkspace(workspaceId: string): Promise<void> {
+    this.assertOpen();
+    this.workspaceTeardownRequests.add(workspaceId);
+    try {
+      const session = this.sessions.get(workspaceId);
+      if (session) {
+        await this.serialize(session, async () => {
+          if (this.sessions.get(workspaceId) !== session) return;
+          session.closing = true;
+          for (const viewerToken of session.viewers.keys()) this.viewerSessions.delete(viewerToken);
+          session.viewers.clear();
+          session.controller = null;
+          try {
+            await this.stopScreencast(session);
+            await session.context.close({ reason: "Shared browser workspace archived" });
+          } finally {
+            this.sessions.delete(workspaceId);
+          }
+        });
+        return;
+      }
+
+      const creation = this.sessionCreations.get(workspaceId);
+      if (!creation) return;
+
+      await creation.catch(() => undefined);
+      const created = this.sessions.get(workspaceId);
+      if (!created) return;
+      await this.serialize(created, async () => {
+        if (this.sessions.get(workspaceId) !== created) return;
+        created.closing = true;
+        for (const viewerToken of created.viewers.keys()) this.viewerSessions.delete(viewerToken);
+        created.viewers.clear();
+        created.controller = null;
+        try {
+          await this.stopScreencast(created);
+          await created.context.close({ reason: "Shared browser workspace archived" });
+        } finally {
+          this.sessions.delete(workspaceId);
+        }
+      });
+    } finally {
+      this.workspaceTeardownRequests.delete(workspaceId);
+    }
   }
 
   async listOpenWorkspaceIds(): Promise<string[]> {
@@ -498,7 +613,12 @@ export class SessionManager {
 
   private async getOrCreateSession(workspaceId: string): Promise<BrowserSession> {
     const existing = this.sessions.get(workspaceId);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.closing || this.workspaceTeardownRequests.has(workspaceId)) {
+        throw new Error("Workspace was archived");
+      }
+      return existing;
+    }
     const pending = this.sessionCreations.get(workspaceId);
     if (pending) return pending;
     if (this.sessions.size + this.sessionCreations.size >= this.maxSessions) {
@@ -508,10 +628,16 @@ export class SessionManager {
     this.sessionCreations.set(workspaceId, creation);
     try {
       const session = await creation;
-      if (this.closed) {
+      if (this.closed || this.workspaceTeardownRequests.has(workspaceId)) {
         session.closing = true;
-        await session.context.close({ reason: "Shared browser manager closed during launch" });
-        throw new Error("Shared browser manager is closed");
+        await session.context.close({
+          reason: this.closed
+            ? "Shared browser manager closed during launch"
+            : "Shared browser workspace archived",
+        });
+        throw new Error(
+          this.closed ? "Shared browser manager is closed" : "Workspace was archived",
+        );
       }
       this.sessions.set(workspaceId, session);
       return session;
@@ -581,7 +707,7 @@ export class SessionManager {
         error: null,
         closing: false,
       };
-      page.on("framenavigated", (frame) => {
+      page.on("framenavigated", (frame: BrowserFrameHandle) => {
         if (frame !== page.mainFrame()) return;
         session.navigationGeneration += 1;
         session.lastUrl = boundedText(frame.url(), 8_192);
@@ -598,13 +724,14 @@ export class SessionManager {
         if (!session.closing) session.error = "Browser page closed unexpectedly";
         this.invalidateFrames(session);
       });
-      context.on("page", (openedPage) => {
+      context.on("page", (openedPage: BrowserPage) => {
         if (openedPage !== page) void openedPage.close().catch(() => undefined);
       });
       context.on("close", () => {
         if (!session.closing) session.error = "Browser context closed unexpectedly";
         this.invalidateFrames(session);
       });
+
       await this.refreshPageMetadata(session);
       return session;
     } catch (error) {
@@ -1054,45 +1181,65 @@ function getProductionManager(): SessionManager {
   return productionManager;
 }
 
-export async function handleAttachBrowser(input: AttachInput, context: PluginHandlerContext) {
+export async function handleAttachBrowser(
+  input: AttachInput,
+  context: PluginHandlerContext,
+): Promise<AttachOutput> {
   const manager = getProductionManager();
   const workspace = await context.paseo.workspaces.ref(input.workspaceId).refresh();
   if (!workspace) throw new Error("Workspace not found");
   return manager.attach(input.workspaceId, input.viewerLabel);
 }
 
-export function handleDetachBrowser({ viewerToken }: DetachInput) {
+export function handleDetachBrowser({ viewerToken }: DetachInput): Promise<DetachOutput> {
   return getProductionManager().detach(viewerToken);
 }
 
-export async function handleListOpenBrowserWorkspaces() {
+export function handleWorkspaceArchived(workspaceId: string): Promise<void> {
+  return getProductionManager().archiveWorkspace(workspaceId);
+}
+
+export async function handleListOpenBrowserWorkspaces(): Promise<ListOpenOutput> {
   return { workspaceIds: await getProductionManager().listOpenWorkspaceIds() };
 }
-export function handleCaptureBrowser({ viewerToken, quality, knownFrameId }: CaptureInput) {
+
+export function handleCaptureBrowser({
+  viewerToken,
+  quality,
+  knownFrameId,
+}: CaptureInput): Promise<CaptureOutput> {
   return getProductionManager().capture(viewerToken, quality, knownFrameId);
 }
 
-export function handleAcquireControl({ viewerToken, takeover }: AcquireControlInput) {
+export function handleAcquireControl({
+  viewerToken,
+  takeover,
+}: AcquireControlInput): Promise<AcquireControlOutput> {
   return getProductionManager().acquireControl(viewerToken, takeover);
 }
 
-export function handleReleaseControl({ viewerToken, controlToken }: ReleaseControlInput) {
+export function handleReleaseControl({
+  viewerToken,
+  controlToken,
+}: ReleaseControlInput): Promise<ReleaseControlOutput> {
   return getProductionManager().releaseControl(viewerToken, controlToken);
 }
 
-export function handleNavigateBrowser(input: NavigateInput) {
+export function handleNavigateBrowser(input: NavigateInput): Promise<NavigateOutput> {
   return getProductionManager().navigate(input);
 }
 
-export function handleResizeBrowser(input: ResizeInput) {
+export function handleResizeBrowser(input: ResizeInput): Promise<ResizeOutput> {
   return getProductionManager().resize(input);
 }
 
-export function handleApplyDevicePreset(input: ApplyDevicePresetInput) {
+export function handleApplyDevicePreset(
+  input: ApplyDevicePresetInput,
+): Promise<ApplyDevicePresetOutput> {
   return getProductionManager().applyDevicePreset(input);
 }
 
-export function handleSendBrowserInput(input: SendInput) {
+export function handleSendBrowserInput(input: SendInput): Promise<SendOutput> {
   return getProductionManager().sendInput(input);
 }
 
