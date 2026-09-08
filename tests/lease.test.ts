@@ -495,4 +495,13 @@ describe("SessionManager control leases", () => {
     expect(contexts).toHaveLength(1);
     await manager.close();
   });
+  it("ignores archive events when the production manager is absent", async () => {
+    vi.resetModules();
+    // Fresh module state isolates the production singleton from the unit-test manager instances.
+    const { cleanupBrowserServer, handleWorkspaceArchived } = await import("../server/browser");
+
+    await cleanupBrowserServer();
+
+    await expect(handleWorkspaceArchived("workspace-never-opened")).resolves.toBeUndefined();
+  });
 });

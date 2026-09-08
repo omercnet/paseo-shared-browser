@@ -93,5 +93,6 @@ to the host's Tailscale IPv4 address, so it runs locally rather than in CI.
 Release Please maintains the version, changelog, tags, and GitHub releases from Conventional
 Commits. Each release attaches an installable `shared-browser-vX.Y.Z.zip` archive.
 
-The plugin targets the Paseo `0.8.0-beta.1` plugin API with React `19.1`, React Native `0.81`, and
-Playwright `1.63`.
+Both the Paseo daemon and app must run Paseo 0.8.x (`>=0.8.0 <0.9.0`, including prereleases);
+Paseo 0.9 and later are intentionally excluded until compatibility is validated. Typechecking targets
+the `0.8.0-beta.1` plugin API with React `19.1`, React Native `0.81`, and Playwright `1.63`.
