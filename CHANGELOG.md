@@ -6,6 +6,13 @@
 
 * migrate Shared Browser to Paseo 0.8 runtime entries and client/server modules
 
+## [0.2.1](https://github.com/omercnet/paseo-shared-browser/compare/v0.2.0...v0.2.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* address Paseo 0.8 migration review feedback ([#10](https://github.com/omercnet/paseo-shared-browser/issues/10)) ([15d2515](https://github.com/omercnet/paseo-shared-browser/commit/15d25157503b7fb70d02c5e420522764250cab62))
+
 ## [0.2.0](https://github.com/omercnet/paseo-shared-browser/compare/v0.1.1...v0.2.0) (2026-09-08)
 
 ### Features
