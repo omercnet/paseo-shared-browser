@@ -5,6 +5,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { BrowserContext, BrowserType, CDPSession, Frame, Page } from "playwright";
 import {
   DEVICE_PRESETS,
   DEFAULT_VIEWPORT,
@@ -29,71 +30,7 @@ import {
   type Viewport,
 } from "../shared/browser";
 
-type LaunchPersistentContextOptions = Record<string, unknown>;
-
-interface BrowserMouse {
-  click(...args: unknown[]): Promise<void>;
-  move(...args: unknown[]): Promise<void>;
-  down(...args: unknown[]): Promise<void>;
-  up(...args: unknown[]): Promise<void>;
-  wheel(...args: unknown[]): Promise<void>;
-}
-
-interface BrowserKeyboard {
-  insertText(...args: unknown[]): Promise<void>;
-  press(...args: unknown[]): Promise<void>;
-  down(...args: unknown[]): Promise<void>;
-  up(...args: unknown[]): Promise<void>;
-}
-
-interface BrowserFrameHandle {
-  url(): string;
-}
-
-interface BrowserPage {
-  mouse: BrowserMouse;
-  keyboard: BrowserKeyboard;
-  url(): string;
-  title(): Promise<string>;
-  mainFrame(): BrowserFrameHandle;
-  setDefaultTimeout(...args: unknown[]): void;
-  setDefaultNavigationTimeout(...args: unknown[]): void;
-  setViewportSize(...args: unknown[]): Promise<void>;
-  goto(...args: unknown[]): Promise<unknown>;
-  goBack(...args: unknown[]): Promise<unknown>;
-  goForward(...args: unknown[]): Promise<unknown>;
-  reload(...args: unknown[]): Promise<unknown>;
-  screenshot(...args: unknown[]): Promise<Buffer>;
-  close(...args: unknown[]): Promise<void>;
-  isClosed(): boolean;
-  on(...args: unknown[]): void;
-}
-
-interface BrowserCdpSession {
-  send(...args: unknown[]): Promise<unknown>;
-  on(...args: unknown[]): void;
-}
-
-interface BrowserContext {
-  pages(...args: unknown[]): BrowserPage[];
-  newPage(...args: unknown[]): Promise<BrowserPage>;
-  newCDPSession(...args: unknown[]): Promise<BrowserCdpSession>;
-  isClosed(): boolean;
-  close(...args: unknown[]): Promise<void>;
-  on(...args: unknown[]): void;
-}
-
-interface ChromiumRuntime {
-  launchPersistentContext(
-    userDataDir: string,
-    options: LaunchPersistentContextOptions,
-  ): Promise<BrowserContext>;
-}
-
-type PersistentContextLauncher = (
-  userDataDir: string,
-  options: LaunchPersistentContextOptions,
-) => Promise<BrowserContext>;
+type PersistentContextLauncher = BrowserType["launchPersistentContext"];
 
 export type WorkspaceValidator = (workspaceId: string) => Promise<void | boolean>;
 
@@ -180,8 +117,8 @@ interface BrowserSession {
   workspaceId: string;
   sessionId: string;
   context: BrowserContext;
-  page: BrowserPage;
-  cdp: BrowserCdpSession;
+  page: Page;
+  cdp: CDPSession;
   viewport: Viewport;
   navigationGeneration: number;
   viewportGeneration: number;
@@ -211,10 +148,10 @@ function defaultStateRoot(): string {
   return join(homedir(), ".paseo", "plugin-data", "shared-browser");
 }
 
-function loadChromium(stateRoot: string): ChromiumRuntime {
+function loadChromium(stateRoot: string): BrowserType {
   const runtimeRequire = createRequire(join(stateRoot, "runtime", "package.json"));
   try {
-    const playwrightRuntime = runtimeRequire("playwright") as { chromium: ChromiumRuntime };
+    const playwrightRuntime = runtimeRequire("playwright") as { chromium: BrowserType };
     return playwrightRuntime.chromium;
   } catch {
     throw new Error(
@@ -343,19 +280,11 @@ export class SessionManager {
     this.assertOpen();
     this.workspaceTeardownRequests.add(workspaceId);
     try {
-      const session = this.sessions.get(workspaceId);
-      if (session) {
-        await this.serialize(session, async () => {
-          if (this.sessions.get(workspaceId) !== session) return;
-          session.closing = true;
-          for (const viewerToken of session.viewers.keys()) this.viewerSessions.delete(viewerToken);
-          session.viewers.clear();
-          session.controller = null;
-          try {
-            await this.stopScreencast(session);
-            await session.context.close({ reason: "Shared browser workspace archived" });
-          } finally {
-            this.sessions.delete(workspaceId);
+      const existing = this.sessions.get(workspaceId);
+      if (existing) {
+        await this.serialize(existing, async () => {
+          if (this.sessions.get(workspaceId) === existing) {
+            await this.teardownArchivedSession(existing);
           }
         });
         return;
@@ -368,16 +297,8 @@ export class SessionManager {
       const created = this.sessions.get(workspaceId);
       if (!created) return;
       await this.serialize(created, async () => {
-        if (this.sessions.get(workspaceId) !== created) return;
-        created.closing = true;
-        for (const viewerToken of created.viewers.keys()) this.viewerSessions.delete(viewerToken);
-        created.viewers.clear();
-        created.controller = null;
-        try {
-          await this.stopScreencast(created);
-          await created.context.close({ reason: "Shared browser workspace archived" });
-        } finally {
-          this.sessions.delete(workspaceId);
+        if (this.sessions.get(workspaceId) === created) {
+          await this.teardownArchivedSession(created);
         }
       });
     } finally {
@@ -607,6 +528,26 @@ export class SessionManager {
     }
   }
 
+  private async teardownArchivedSession(session: BrowserSession): Promise<void> {
+    session.closing = true;
+    try {
+      await this.stopScreencast(session);
+    } finally {
+      try {
+        await session.context.close({ reason: "Shared browser workspace archived" });
+      } finally {
+        for (const viewerToken of session.viewers.keys()) {
+          this.viewerSessions.delete(viewerToken);
+        }
+        session.viewers.clear();
+        session.controller = null;
+        if (this.sessions.get(session.workspaceId) === session) {
+          this.sessions.delete(session.workspaceId);
+        }
+      }
+    }
+  }
+
   private assertOpen(): void {
     if (this.closed) throw new Error("Shared browser manager is closed");
   }
@@ -707,7 +648,7 @@ export class SessionManager {
         error: null,
         closing: false,
       };
-      page.on("framenavigated", (frame: BrowserFrameHandle) => {
+      page.on("framenavigated", (frame: Frame) => {
         if (frame !== page.mainFrame()) return;
         session.navigationGeneration += 1;
         session.lastUrl = boundedText(frame.url(), 8_192);
@@ -724,7 +665,7 @@ export class SessionManager {
         if (!session.closing) session.error = "Browser page closed unexpectedly";
         this.invalidateFrames(session);
       });
-      context.on("page", (openedPage: BrowserPage) => {
+      context.on("page", (openedPage: Page) => {
         if (openedPage !== page) void openedPage.close().catch(() => undefined);
       });
       context.on("close", () => {
@@ -1195,8 +1136,8 @@ export function handleDetachBrowser({ viewerToken }: DetachInput): Promise<Detac
   return getProductionManager().detach(viewerToken);
 }
 
-export function handleWorkspaceArchived(workspaceId: string): Promise<void> {
-  return getProductionManager().archiveWorkspace(workspaceId);
+export async function handleWorkspaceArchived(workspaceId: string): Promise<void> {
+  await productionManager?.archiveWorkspace(workspaceId);
 }
 
 export async function handleListOpenBrowserWorkspaces(): Promise<ListOpenOutput> {
