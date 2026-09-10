@@ -1,5 +1,15 @@
 # Shared Browser
 
+> [!IMPORTANT]
+> This repository is archived. Development moved to
+> [`omercnet/paseo-plugins/paseo-shared-browser`](https://github.com/omercnet/paseo-plugins/tree/main/paseo-shared-browser).
+> Existing Paseo Git installations remain on this repository. Migrate with:
+>
+> ```bash
+> paseo plugin remove shared-browser
+> paseo plugin add omercnet/paseo-plugins:paseo-shared-browser
+> ```
+
 A Paseo plugin that runs one real Chromium browser per workspace on the daemon host and shares that
 exact live session with every connected Paseo client.
 
@@ -37,16 +47,18 @@ hands it over explicitly.
 Install on the Paseo daemon host with plugins enabled:
 
 ```bash
-paseo plugin add omercnet/paseo-shared-browser
+paseo plugin add omercnet/paseo-plugins:paseo-shared-browser
 paseo plugin ls
 ```
 
-Or install a published archive:
+Or install from a local monorepo checkout:
 
 ```bash
-gh release download --repo omercnet/paseo-shared-browser --pattern 'shared-browser-*.zip'
-unzip shared-browser-v*.zip
-paseo plugin install "$PWD/shared-browser"
+cd paseo-plugins/paseo-shared-browser
+npm ci
+npm run prepare:runtime
+npm exec -- playwright install chromium
+paseo plugin install "$PWD"
 ```
 
 Installation runs the manifest `build` steps: `npm ci`, `npm run prepare:runtime`, and
